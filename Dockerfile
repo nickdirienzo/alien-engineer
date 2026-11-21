@@ -27,7 +27,7 @@ COPY harness/requirements /harness/queue
 RUN chown -R root:root /harness && chmod -R go-rwx /harness
 
 # Sacred: released spec, checks, harness, prompt. Readable, not writable.
-COPY program.md spec_check.sh evolve.sh /sacred/
+COPY program.md REVIEW.md spec_check.sh evolve.sh /sacred/
 COPY harness/lib /sacred/lib
 RUN mkdir -p /sacred/spec /sacred/checks && chmod -R a+rX,go-w /sacred
 

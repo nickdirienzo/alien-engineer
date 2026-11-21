@@ -22,6 +22,8 @@ HOST = "127.0.0.1"
 PORT = 8080
 RUN_DIR = os.environ.get("RUN_DIR", "")
 PGID_FILE = RUN_DIR + ".pgid"
+ENTRY = os.environ.get("APP_ENTRY", "lang/run")   # the agent's toolchain
+APP = os.environ.get("APP_DIR", "apps/todo")      # the program it runs
 LOG_FILE = RUN_DIR + ".log"
 
 Resp = namedtuple("Resp", "status json headers raw")
@@ -129,21 +131,23 @@ def hard_kill():
 
 
 def stop():
-    """Graceful stop: stop.sh if the system provides one, then SIGKILL."""
-    if os.path.exists(os.path.join(RUN_DIR, "stop.sh")):
-        try:
-            subprocess.run(["bash", "stop.sh"], cwd=RUN_DIR, timeout=10,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except (subprocess.TimeoutExpired, OSError):
-            pass
+    """Graceful stop: SIGTERM the process group, wait up to 5s, then SIGKILL."""
+    try:
+        with open(PGID_FILE) as f:
+            os.killpg(int(f.read().strip()), signal.SIGTERM)
+        deadline = time.time() + 5
+        while _port_open() and time.time() < deadline:
+            time.sleep(0.05)
+    except (OSError, ValueError):
+        pass
     hard_kill()
 
 
 def start(timeout=10):
-    """Run start.sh and wait until GET /todos answers. Returns seconds taken."""
+    """Run `lang/run apps/todo` and wait until GET /todos answers. Returns seconds taken."""
     t0 = time.time()
     log = open(LOG_FILE, "ab")
-    p = subprocess.Popen(["bash", "start.sh"], cwd=RUN_DIR, stdin=subprocess.DEVNULL,
+    p = subprocess.Popen([os.path.join(RUN_DIR, ENTRY), APP], cwd=RUN_DIR, stdin=subprocess.DEVNULL,
                          stdout=log, stderr=log, start_new_session=True)
     with open(PGID_FILE, "w") as f:
         f.write(str(p.pid))
@@ -151,7 +155,7 @@ def start(timeout=10):
         if req("GET", "/todos", timeout=2).status:
             return time.time() - t0
         time.sleep(0.05)
-    raise RuntimeError("system did not answer GET /todos within %ss of start.sh" % timeout)
+    raise RuntimeError("system did not answer GET /todos within %ss of `%s %s`" % (timeout, ENTRY, APP))
 
 
 def restart(graceful=True, timeout=10):

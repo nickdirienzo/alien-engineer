@@ -2,13 +2,13 @@
 
 ### Environment contract
 
-- The workspace root MUST contain `start.sh`. The harness runs `bash start.sh`
-  from a **fresh copy of the workspace** (without `.git`) and waits for the
-  system to answer HTTP on port 8080 (127.0.0.1), for at most 10 seconds.
+- The harness copies the workspace (without `.git`) to a fresh directory and,
+  from that directory's root, executes `lang/run apps/todo`. The system must
+  answer HTTP on 127.0.0.1:8080 within 10 seconds.
 - All persistent state MUST live inside that copied directory. Each check run
   starts from the workspace as committed, so state from earlier runs is gone.
-- To stop the system the harness runs `bash stop.sh` if it exists, then
-  SIGKILLs the process group started by `start.sh` and anything still
+- To stop the system, the harness sends SIGTERM to the process group it
+  started, waits up to 5 seconds, then SIGKILLs the group and anything still
   listening on port 8080.
 
 ### API

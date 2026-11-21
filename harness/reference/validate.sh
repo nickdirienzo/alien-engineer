@@ -12,8 +12,10 @@ trap 'rm -rf "$TMP"' EXIT
 stage() {  # name tags reqs...
   local name="$1" tags="$2"; shift 2
   rm -rf "$TMP/ws" "$TMP/checks"; mkdir -p "$TMP/ws" "$TMP/checks"
-  cp "$ROOT/harness/reference/app.py" "$TMP/ws/"
-  printf '#!/usr/bin/env bash\ncd "$(dirname "$0")"\nTAGS=%s exec python3 app.py\n' "$tags" > "$TMP/ws/start.sh"
+  mkdir -p "$TMP/ws/lang" "$TMP/ws/apps/todo"
+  cp "$ROOT/harness/reference/app.py" "$TMP/ws/apps/todo/"
+  printf '#!/usr/bin/env bash\nTAGS=%s exec python3 "$1/app.py"\n' "$tags" > "$TMP/ws/lang/run"
+  chmod +x "$TMP/ws/lang/run"
   for r in "$@"; do cp "$REQ/$r/check.py" "$TMP/checks/$r.py"; done
   echo "######## stage $name (TAGS=$tags): $*"
   WORKSPACE="$TMP/ws" CHECKS_DIR="$TMP/checks" SPEC_SUMMARY="$TMP/$name.json" \

@@ -15,6 +15,8 @@ MODELS="${MODELS:-${MODEL:-claude-fable-5-2}}"   # comma-separated = rotate main
 REQ_GAP="${REQ_GAP:-1}"                           # passing gens between releases
 GEN_TIMEOUT="${GEN_TIMEOUT:-3600}"                # seconds per agent run
 EFFORT="${EFFORT:-max}"
+REVIEW_MODEL="${REVIEW_MODEL:-claude-sonnet-5-5}"
+REVIEW_TIMEOUT="${REVIEW_TIMEOUT:-900}"
 
 QUEUE=/harness/queue
 RES=/results
@@ -31,7 +33,7 @@ save_state() {
     "$GENERATION" "$RELEASED" "$LAST_RELEASE_GEN" "$LAST_RESULT" "$PENDING_REQ" > "$STATE"
 }
 
-[ -f "$METRICS" ] || printf 'gen\tmodel\treleased\tactive\tresult\tchecks_passed\tchecks_total\tfailing\tcost_usd\tduration_s\tturns\tinput_tokens\toutput_tokens\tcache_read_tokens\tcache_write_tokens\tfiles\tbytes\tlines_changed\tfile_types\n' > "$METRICS"
+[ -f "$METRICS" ] || printf 'gen\tmodel\treleased\tactive\tresult\tchecks_passed\tchecks_total\tfailing\tcost_usd\tduration_s\tturns\tinput_tokens\toutput_tokens\tcache_read_tokens\tcache_write_tokens\treview\treview_cost_usd\tfiles\tbytes\tlang_bytes\tapp_bytes\tlines_changed\tfile_types\n' > "$METRICS"
 
 IFS=',' read -r -a MODEL_LIST <<< "$MODELS"
 QUEUE_ITEMS=($(ls "$QUEUE" | sort))
@@ -104,14 +106,10 @@ $(cat "/sacred/spec/$PENDING_REQ.md")"
 
 No new requirements."
   fi
-  if [ "$LAST_RESULT" = fail ] && [ -f "$LOGS/last_fail.log" ]; then
+  if [ "$LAST_RESULT" != pass ] && [ "$LAST_RESULT" != none ] && [ -f "$LOGS/last_fail.log" ]; then
     PROMPT="$PROMPT
 
-The previous generation's changes failed the checks and were reverted. End of its check log:
-
-\`\`\`
-$(tail -c 6000 "$LOGS/last_fail.log")
-\`\`\`"
+The previous generation's changes were reverted. $(cat "$LOGS/last_fail.log")"
   fi
 
   # ---- agent ----------------------------------------------------------------
@@ -135,15 +133,45 @@ $(tail -c 6000 "$LOGS/last_fail.log")
   kill_agent_procs
   cp "$SUMMARY" "$LOGS/gen_${GENERATION}_summary.json" 2>/dev/null || true
 
-  cd /experiment
+  # ---- review (only if the checks passed) ----------------------------------
+  REVIEW=skipped; REVIEW_COST=0
   if [ "$SPEC_EXIT" -eq 0 ]; then
+    REVIEW_LOG="$LOGS/gen_${GENERATION}_review.json"
+    REVIEW_PROMPT="You are a reviewer. Audit the repository at /experiment against the rules in /sacred/REVIEW.md. Read whatever you need: the rules, lang/, apps/, and anything else. Fail only clear violations of the rules, never style or quality. Your final line must be exactly 'VERDICT: PASS' or 'VERDICT: FAIL: <one or two sentences naming the rule and the files>'."
+    (cd /experiment && sudo -u agent -E env HOME=/home/agent timeout --signal=KILL "$REVIEW_TIMEOUT" \
+      claude -p "$REVIEW_PROMPT" --model "$REVIEW_MODEL" --allowedTools "Read,Grep,Glob" \
+        --output-format json < /dev/null > "$REVIEW_LOG" 2>&1)
+    kill_agent_procs
+    read -r REVIEW REVIEW_COST < <(python3 - "$REVIEW_LOG" "$LOGS/review_reason.txt" <<'PYEOF'
+import json, re, sys
+try:
+    d = json.loads(open(sys.argv[1]).read().strip().splitlines()[-1])
+except Exception:
+    d = {}
+text = str(d.get("result", ""))
+m = re.findall(r"VERDICT:\s*(PASS|FAIL)(?::\s*(.*))?", text)
+verdict = "error" if not m else ("pass" if m[-1][0] == "PASS" else "fail")
+open(sys.argv[2], "w").write((m[-1][1] if m else text[-2000:]) or "")
+print(verdict, d.get("total_cost_usd", d.get("cost_usd", 0)) or 0)
+PYEOF
+)
+    echo "    review: $REVIEW"
+  fi
+
+  cd /experiment
+  if [ "$SPEC_EXIT" -eq 0 ] && [ "$REVIEW" != fail ]; then
     RESULT=pass; PENDING_REQ=""
     sudo -u agent git add -A
     sudo -u agent git commit -q --allow-empty -m "generation $GENERATION: pass (${NEW_REQ:-no new requirement}; $MODEL)"
     LINES=$(git diff --shortstat HEAD~1 HEAD 2>/dev/null | grep -oE '[0-9]+ (insertion|deletion)' | awk '{s+=$1} END {print s+0}')
   else
-    RESULT=fail
-    cp "$SPEC_LOG" "$LOGS/last_fail.log"
+    if [ "$SPEC_EXIT" -ne 0 ]; then
+      RESULT=fail
+      { echo "The checks failed. End of the check log:"; echo; echo '```'; tail -c 6000 "$SPEC_LOG"; echo '```'; } > "$LOGS/last_fail.log"
+    else
+      RESULT=rejected
+      { echo "The checks passed, but the reviewer rejected the changes under /sacred/REVIEW.md:"; echo; cat "$LOGS/review_reason.txt"; } > "$LOGS/last_fail.log"
+    fi
     sudo -u agent git checkout -q -- . 2>/dev/null
     sudo -u agent git clean -qfd 2>/dev/null
     LINES=0
@@ -170,14 +198,16 @@ try:
 except Exception:
     s = {}
 files = subprocess.run(["git", "-C", "/experiment", "ls-files"], capture_output=True, text=True).stdout.split()
-size = sum(os.path.getsize(os.path.join("/experiment", f)) for f in files if os.path.isfile(os.path.join("/experiment", f)))
+def sz(prefix=""):
+    return sum(os.path.getsize(os.path.join("/experiment", f)) for f in files
+               if f.startswith(prefix) and os.path.isfile(os.path.join("/experiment", f)))
 types = Counter((os.path.splitext(f)[1] or os.path.basename(f)).lstrip(".") for f in files)
 row = ["$GENERATION", "$MODEL", "${NEW_REQ:--}", "$(active_list)", "$RESULT",
        s.get("passed", ""), s.get("total", ""), ",".join(s.get("failed_requirements", [])) or "-",
        res.get("total_cost_usd", res.get("cost_usd", "")), round(res.get("duration_ms", $WALL * 1000) / 1000, 1),
        res.get("num_turns", ""), u.get("input_tokens", ""), u.get("output_tokens", ""),
        u.get("cache_read_input_tokens", ""), u.get("cache_creation_input_tokens", ""),
-       len(files), size, "$LINES", ",".join("%s:%d" % kv for kv in types.most_common(6))]
+       "$REVIEW", "$REVIEW_COST", len(files), sz(), sz("lang/"), sz("apps/"), "$LINES", ",".join("%s:%d" % kv for kv in types.most_common(6))]
 print("\t".join(str(x) for x in row))
 EOF
 

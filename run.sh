@@ -8,7 +8,7 @@ set -euo pipefail
 #   CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-... ./run.sh     (claude setup-token)
 #
 # Env: MODELS (comma list rotates maintainers), MAX_GENERATIONS, REQ_GAP,
-#      GEN_TIMEOUT, EFFORT, ALLOW_APT
+#      GEN_TIMEOUT, EFFORT, REVIEW_MODEL, ALLOW_APT
 # =============================================================================
 
 AUTH_ARGS=()
@@ -34,6 +34,7 @@ docker run --name "$CONTAINER_NAME" "${AUTH_ARGS[@]}" \
   -e REQ_GAP="${REQ_GAP:-1}" \
   -e GEN_TIMEOUT="${GEN_TIMEOUT:-3600}" \
   -e EFFORT="${EFFORT:-max}" \
+  -e REVIEW_MODEL="${REVIEW_MODEL:-claude-sonnet-5-5}" \
   alien-engineer || true
 
 mkdir -p "$OUT"

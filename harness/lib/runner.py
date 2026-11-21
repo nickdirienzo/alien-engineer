@@ -36,12 +36,15 @@ def main():
 
     print("=== Spec check (%d requirements active) ===" % len(checks), flush=True)
     harness.hard_kill()
-    if not os.path.exists(os.path.join(run_dir, "start.sh")):
-        fatal = "no start.sh in the workspace root"
+    entry = os.path.join(run_dir, harness.ENTRY)
+    if not (os.path.isfile(entry) and os.access(entry, os.X_OK)):
+        fatal = "%s is missing or not executable" % harness.ENTRY
+    elif not os.path.isdir(os.path.join(run_dir, harness.APP)):
+        fatal = "%s/ does not exist" % harness.APP
     else:
         try:
             harness.start()
-        except RuntimeError as e:
+        except (RuntimeError, OSError) as e:
             fatal = str(e)
 
     if not fatal:

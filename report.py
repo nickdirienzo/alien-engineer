@@ -38,7 +38,7 @@ for r in rows:
     q = reqs[current]
     if q["satisfied"] is None:
         q["gens"] += 1
-        q["cost"] += num(r["cost_usd"])
+        q["cost"] += num(r["cost_usd"]) + num(r.get("review_cost_usd"))
         q["out_tokens"] += num(r["output_tokens"])
         if r["result"] == "pass":
             q["satisfied"] = int(r["gen"])
@@ -46,9 +46,10 @@ for r in rows:
             q["regressions"] |= {f for f in r["failing"].split(",") if f not in ("-", current)}
 
 print("# alien-engineer run report\n")
-total = sum(num(r["cost_usd"]) for r in rows)
-print("%d generations, %d requirements released, %d passing generations, $%.2f total.\n"
-      % (len(rows), len(reqs), sum(r["result"] == "pass" for r in rows), total))
+total = sum(num(r["cost_usd"]) + num(r.get("review_cost_usd")) for r in rows)
+print("%d generations, %d requirements released, %d passed, %d failed checks, %d rejected by review, $%.2f total.\n"
+      % (len(rows), len(reqs), sum(r["result"] == "pass" for r in rows), sum(r["result"] == "fail" for r in rows),
+         sum(r["result"] == "rejected" for r in rows), total))
 
 print("## Cost to absorb each requirement\n")
 print("| requirement | released gen | gens to pass | cost $ | output tokens | broke older requirements along the way |")
@@ -59,12 +60,13 @@ for name, q in reqs.items():
         q["cost"], q["out_tokens"], ", ".join(sorted(q["regressions"])) or "-"))
 
 print("\n## Every generation\n")
-print("| gen | model | new req | result | failing | cost $ | turns | out tokens | files | bytes | lines changed | file types |")
-print("|---|---|---|---|---|---|---|---|---|---|---|---|")
+print("| gen | model | new req | result | failing | review | cost $ | turns | out tokens | lang bytes | app bytes | lines changed | file types |")
+print("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 for r in rows:
-    print("| %s | %s | %s | %s | %s | %.2f | %s | %s | %s | %s | %s | %s |" % (
-        r["gen"], r["model"], r["released"], r["result"], r["failing"], num(r["cost_usd"]), r["turns"],
-        r["output_tokens"], r["files"], r["bytes"], r["lines_changed"], r["file_types"]))
+    print("| %s | %s | %s | %s | %s | %s | %.2f | %s | %s | %s | %s | %s | %s |" % (
+        r["gen"], r["model"], r["released"], r["result"], r["failing"], r.get("review", ""), num(r["cost_usd"]),
+        r["turns"], r["output_tokens"], r.get("lang_bytes", ""), r.get("app_bytes", ""), r["lines_changed"],
+        r["file_types"]))
 
 by_model = defaultdict(lambda: [0, 0, 0.0])
 for r in rows:
