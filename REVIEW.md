@@ -19,6 +19,8 @@ and is the thing the programs depend on.
    such as a chat server or a key-value store, be written in this language
    without changing `lang/`? If only a todo service is possible, the language
    is the app.
+   This covers `lang/verify` too: whatever it checks about a particular
+   program comes from that program's own directory.
 
 3. **Programs reach the world only through the language.** An app touches
    sockets, files, processes, and time only through capabilities its language

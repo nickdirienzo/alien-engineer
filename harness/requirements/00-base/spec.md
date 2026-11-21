@@ -2,14 +2,20 @@
 
 ### Environment contract
 
-- The harness copies the workspace (without `.git`) to a fresh directory and,
+- The harness copies the workspace's files (tracked or untracked, but not
+  `.git` and not git-ignored files) to a fresh directory and,
   from that directory's root, executes `lang/run apps/todo`. The system must
-  answer HTTP on 127.0.0.1:8080 within 10 seconds.
+  answer HTTP on 127.0.0.1, on the port given by the `PORT` environment
+  variable (8080 if unset), within 10 seconds.
+- The harness runs as a different user than the maintainer, with an empty
+  home directory, a minimal environment, and no network access beyond
+  localhost. Everything the system needs at run time must be in the workspace
+  or already installed system-wide.
 - All persistent state MUST live inside that copied directory. Each check run
   starts from the workspace as committed, so state from earlier runs is gone.
 - To stop the system, the harness sends SIGTERM to the process group it
   started, waits up to 5 seconds, then SIGKILLs the group and anything still
-  listening on port 8080.
+  listening on the port.
 
 ### API
 

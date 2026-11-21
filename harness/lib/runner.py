@@ -30,8 +30,8 @@ def main():
     import harness  # noqa: E402  (reads RUN_DIR at import)
 
     fatal = None
-    shutil.copytree(WORKSPACE, run_dir, symlinks=True,
-                    ignore=shutil.ignore_patterns(".git"))
+    from export import export_tree  # noqa: E402
+    export_tree(WORKSPACE, run_dir)
     checks = sorted(f for f in os.listdir(CHECKS_DIR) if f.endswith(".py"))
 
     print("=== Spec check (%d requirements active) ===" % len(checks), flush=True)

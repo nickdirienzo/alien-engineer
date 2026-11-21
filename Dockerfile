@@ -1,7 +1,7 @@
 FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y \
-    curl git lsof procps python3 python3-pip jq build-essential sudo \
+    curl git lsof procps iptables python3 python3-pip jq build-essential sudo \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
@@ -22,9 +22,18 @@ RUN useradd -m -s /bin/bash agent \
     && if [ "$ALLOW_APT" = "1" ]; then \
          echo "agent ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt" > /etc/sudoers.d/agent; fi
 
-# Hidden requirement queue: root-only.
+# runner executes the system under test (empty home, no API key, no network).
+# probe runs reviewer and probe models on copies of the workspace.
+RUN useradd -m -s /bin/bash runner && useradd -m -s /bin/bash probe
+
+# Hidden from the agent: the loop and the requirement queue (root only), and
+# the benchmark and newcomer tasks (root + runner).
 COPY harness/requirements /harness/queue
-RUN chown -R root:root /harness && chmod -R go-rwx /harness
+COPY harness/evolve.py /harness/evolve.py
+COPY harness/private /opt/ae-private
+COPY harness/probes /opt/ae-private/probes
+RUN chown -R root:root /harness && chmod -R go-rwx /harness \
+    && chown -R root:runner /opt/ae-private && chmod -R u=rwX,g=rX,o= /opt/ae-private
 
 # Sacred: released spec, checks, harness, prompt. Readable, not writable.
 COPY program.md REVIEW.md spec_check.sh evolve.sh /sacred/
@@ -36,10 +45,10 @@ RUN mkdir -p /results && chmod 700 /results
 
 # Agent workspace.
 RUN mkdir -p /experiment && chown agent:agent /experiment
-RUN mkdir -p /home/agent/.claude && \
-    echo '{"hasCompletedOnboarding": true}' > /home/agent/.claude.json && \
-    cp /home/agent/.claude.json /home/agent/.claude/.claude.json && \
-    chown -R agent:agent /home/agent/.claude /home/agent/.claude.json
+RUN for u in agent probe; do mkdir -p /home/$u/.claude && \
+    echo '{"hasCompletedOnboarding": true}' > /home/$u/.claude.json && \
+    cp /home/$u/.claude.json /home/$u/.claude/.claude.json && \
+    chown -R $u:$u /home/$u/.claude /home/$u/.claude.json; done
 
 USER agent
 WORKDIR /experiment

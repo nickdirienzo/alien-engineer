@@ -359,4 +359,4 @@ if __name__ == "__main__":
     load()
     ThreadingHTTPServer.daemon_threads = True
     ThreadingHTTPServer.request_queue_size = 128
-    ThreadingHTTPServer(("127.0.0.1", 8080), H).serve_forever()
+    ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("PORT", "8080"))), H).serve_forever()

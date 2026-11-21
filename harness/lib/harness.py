@@ -19,7 +19,7 @@ import uuid
 from collections import namedtuple
 
 HOST = "127.0.0.1"
-PORT = 8080
+PORT = int(os.environ.get("PORT", "8080"))
 RUN_DIR = os.environ.get("RUN_DIR", "")
 PGID_FILE = RUN_DIR + ".pgid"
 ENTRY = os.environ.get("APP_ENTRY", "lang/run")   # the agent's toolchain
@@ -147,7 +147,7 @@ def start(timeout=10):
     """Run `lang/run apps/todo` and wait until GET /todos answers. Returns seconds taken."""
     t0 = time.time()
     log = open(LOG_FILE, "ab")
-    p = subprocess.Popen([os.path.join(RUN_DIR, ENTRY), APP], cwd=RUN_DIR, stdin=subprocess.DEVNULL,
+    p = subprocess.Popen([os.path.join(RUN_DIR, ENTRY), APP], cwd=RUN_DIR, env=dict(os.environ, PORT=str(PORT)), stdin=subprocess.DEVNULL,
                          stdout=log, stderr=log, start_new_session=True)
     with open(PGID_FILE, "w") as f:
         f.write(str(p.pid))
@@ -156,6 +156,17 @@ def start(timeout=10):
             return time.time() - t0
         time.sleep(0.05)
     raise RuntimeError("system did not answer GET /todos within %ss of `%s %s`" % (timeout, ENTRY, APP))
+
+
+def group_rss_mb():
+    """Resident memory of the system's process group, in MB."""
+    try:
+        with open(PGID_FILE) as f:
+            pgid = f.read().strip()
+        out = subprocess.run(["ps", "-eo", "pgid=,rss="], capture_output=True, text=True).stdout
+        return round(sum(int(l.split()[1]) for l in out.splitlines() if l.split() and l.split()[0] == pgid) / 1024, 1)
+    except (OSError, ValueError, IndexError):
+        return None
 
 
 def restart(graceful=True, timeout=10):
