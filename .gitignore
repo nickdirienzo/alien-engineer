@@ -1,1 +1,3 @@
-lab.tsv
+results/
+harness/reference/data/
+__pycache__/

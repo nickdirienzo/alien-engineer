@@ -2,69 +2,42 @@
 set -euo pipefail
 
 # =============================================================================
-# run.sh — build the sandbox and start the evolution loop
+# run.sh — build the sandbox and start the maintenance loop
 #
-# Usage (pick one):
-#   CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-... ./run.sh
 #   ANTHROPIC_API_KEY=sk-ant-... ./run.sh
+#   CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-... ./run.sh     (claude setup-token)
 #
-# For OAuth, generate a long-lived token first:
-#   claude setup-token
+# Env: MODELS (comma list rotates maintainers), MAX_GENERATIONS, REQ_GAP,
+#      GEN_TIMEOUT, EFFORT, ALLOW_APT
 # =============================================================================
 
-# Check for auth
 AUTH_ARGS=()
 if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
   AUTH_ARGS+=(-e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN")
-  echo "Auth: OAuth token"
 elif [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   AUTH_ARGS+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
-  echo "Auth: API key"
 else
-  echo "FATAL: Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY"
-  echo ""
-  echo "  # OAuth (uses your subscription, generate with: claude setup-token)"
-  echo "  export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..."
-  echo ""
-  echo "  # Or API key (pay per token)"
-  echo "  export ANTHROPIC_API_KEY=sk-ant-..."
-  echo ""
-  exit 1
+  echo "FATAL: set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN"; exit 1
 fi
 
-MAX_GENERATIONS="${MAX_GENERATIONS:-100}"
-MODEL="${MODEL:-claude-opus-4-6}"
-CONTAINER_NAME="alien-engineer"
+CONTAINER_NAME="${CONTAINER_NAME:-alien-engineer}"
+OUT="${OUT:-./results}"
 
-echo "=== Building sandbox ==="
-docker build -t alien-engineer .
-
-# Stop previous run if exists
+docker build --build-arg ALLOW_APT="${ALLOW_APT:-0}" -t alien-engineer .
 docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 
-echo "=== Starting evolution ==="
-echo "Max generations: $MAX_GENERATIONS"
-echo "Model: $MODEL"
-echo "Container: $CONTAINER_NAME"
-echo ""
-echo "To watch: ./watch.sh"
-echo "To stop:  docker stop $CONTAINER_NAME"
-echo "To extract results:"
-echo "  docker cp $CONTAINER_NAME:/experiment ./results"
-echo ""
+echo "Watch:   ./watch.sh"
+echo "Stop:    docker stop $CONTAINER_NAME   (resume: docker start -a $CONTAINER_NAME)"
+docker run --name "$CONTAINER_NAME" "${AUTH_ARGS[@]}" \
+  -e MODELS="${MODELS:-${MODEL:-claude-fable-5-2}}" \
+  -e MAX_GENERATIONS="${MAX_GENERATIONS:-60}" \
+  -e REQ_GAP="${REQ_GAP:-1}" \
+  -e GEN_TIMEOUT="${GEN_TIMEOUT:-3600}" \
+  -e EFFORT="${EFFORT:-max}" \
+  alien-engineer || true
 
-docker run \
-  --name "$CONTAINER_NAME" \
-  "${AUTH_ARGS[@]}" \
-  -e MAX_GENERATIONS="$MAX_GENERATIONS" \
-  -e MODEL="$MODEL" \
-  --network host \
-  alien-engineer
-
-# Extract results after evolution completes
-echo ""
-echo "=== Extracting results ==="
-mkdir -p ./results
-docker cp "$CONTAINER_NAME":/experiment/. ./results
-echo "Results saved to ./results/"
-echo "  git -C ./results log --oneline"
+mkdir -p "$OUT"
+docker cp "$CONTAINER_NAME":/experiment/. "$OUT/experiment"
+docker cp "$CONTAINER_NAME":/results/. "$OUT/results"
+python3 report.py "$OUT/results/metrics.tsv" > "$OUT/REPORT.md"
+echo "Results in $OUT/ (git -C $OUT/experiment log; $OUT/REPORT.md)"
